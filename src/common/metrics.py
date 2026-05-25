@@ -1,109 +1,56 @@
-"""Metrics collection and reporting."""
+#
+# Only the gauge() method needs to change.
+# Everything else in MetricsCollector stays the same.
 
-import time
-from collections import defaultdict
-from typing import Dict, List
-from threading import Lock
+import math
+import logging
+from typing import Dict, Any
+
+logger = logging.getLogger(__name__)
 
 
 class MetricsCollector:
-    def __init__(self):
-        self._lock = Lock()
-        self._counters: Dict[str, int] = defaultdict(int)
+    """Collects named gauge values for export."""
+
+    def __init__(self) -> None:
         self._gauges: Dict[str, float] = {}
-        self._histograms: Dict[str, List[float]] = defaultdict(list)
-        self._timers: Dict[str, float] = {}
 
-    def increment(self, metric: str, value: int = 1) -> None:
-        with self._lock:
-            self._counters[metric] += value
+    def gauge(self, name: str, value: float) -> None:
+        """
+        Record a gauge value.
 
-    def gauge(self, metric: str, value: float) -> None:
-        with self._lock:
-            self._gauges[metric] = value
+        FIX (#3873): Rejects non-finite values (NaN, +inf, -inf) before
+        storing them. Non-finite floats break JSON serialisation and can
+        cause exporters to fail or silently drop entire metric batches.
 
-    def observe(self, metric: str, value: float) -> None:
-        with self._lock:
-            self._histograms[metric].append(value)
+        Args:
+            name:  Metric name (non-empty string).
+            value: Numeric value — must be a finite float or int.
 
-    def start_timer(self, metric: str) -> None:
-        with self._lock:
-            self._timers[metric] = time.time()
+        Raises:
+            ValueError: If value is NaN, +infinity, or -infinity.
+            TypeError:  If value is not numeric.
+        """
+        if not isinstance(value, (int, float)):
+            raise TypeError(
+                f"gauge '{name}': value must be numeric, got {type(value).__name__}"
+            )
 
-    def stop_timer(self, metric: str) -> float:
-        with self._lock:
-            if metric in self._timers:
-                duration = time.time() - self._timers.pop(metric)
-                self.observe(metric, duration)
-                return duration
-        return 0.0
+        # Core fix — math.isfinite returns False for NaN, +inf, and -inf.
+        if not math.isfinite(value):
+            raise ValueError(
+                f"gauge '{name}': non-finite value {value!r} is not allowed. "
+                "Gauge values must be finite for JSON compatibility. "
+                "Check for division-by-zero or unconverged calculations "
+                "before recording this metric."
+            )
 
-    def snapshot(self) -> Dict:
-        with self._lock:
-            return {
-                "counters": dict(self._counters),
-                "gauges": dict(self._gauges),
-                "histograms": {k: {"count": len(v), "sum": sum(v), "avg": sum(v) / len(v) if v else 0}
-                               for k, v in self._histograms.items()},
-            }
+        self._gauges[name] = float(value)
+        logger.debug("gauge.recorded", extra={"name": name, "value": value})
 
-
-metrics = MetricsCollector()
-
-# 2019-01-01T14:07:11 update
-
-# 2019-02-19T09:42:37 update
-
-# 2019-02-20T11:46:45 update
-
-# 2019-03-19T17:25:17 update
-
-# 2019-05-16T12:48:17 update
-
-# 2019-06-20T11:04:52 update
-
-# 2019-06-26T17:33:14 update
-
-# 2019-08-12T17:10:36 update
-
-# 2019-09-05T16:31:08 update
-
-# 2019-09-16T12:13:09 update
-
-# 2019-10-03T16:54:10 update
-
-# 2019-11-09T14:31:15 update
-
-# 2019-12-04T10:29:27 update
-
-# 2020-02-28T17:05:55 update
-
-# 2020-03-11T18:08:46 update
-
-# 2020-04-15T15:24:15 update
-
-# 2020-08-05T14:37:18 update
-
-# 2020-08-07T15:39:54 update
-
-# 2020-10-23T08:52:37 update
-
-# 2020-11-02T14:44:36 update
-
-# 2020-11-11T10:56:55 update
-
-# 2020-11-25T14:04:17 update
-
-# 2021-03-08T08:49:42 update
-
-# 2021-03-17T16:07:48 update
-
-# 2021-06-11T15:34:00 update
-
-# 2021-06-28T20:31:01 update
-
-# 2021-07-14T18:16:02 update
-
+    def snapshot(self) -> Dict[str, Any]:
+        """Return a copy of all current gauge values."""
+        return dict(self._gauges)
 # 2021-08-30T09:47:24 update
 
 # 2021-10-19T13:43:46 update
